@@ -1,4 +1,4 @@
-import { ExampleToken } from './Token';
+import { ExampleToken, ExampleTokenUser } from './Token';
 import {
   isReady,
   shutdown,
@@ -9,6 +9,7 @@ import {
   UInt64,
   Signature,
   Field,
+  Experimental,
 } from 'snarkyjs';
 
 /*
@@ -97,10 +98,17 @@ describe('ExampleToken', () => {
     const sendToAddressPrivate = PrivateKey.random();
     const sendToAddress = sendToAddressPrivate.toPublicKey();
 
+    await ExampleTokenUser.compile();
+
     // failed send because account doesn't have tokens
     const txn = await Mina.transaction(deployerAccount, () => {
       AccountUpdate.fundNewAccount(deployerAccount);
-      zkApp.sendTokens(deployerAccount, sendToAddress, amount100);
+      zkApp.tokenDeploy(deployerAccount, ExampleTokenUser._verificationKey!);
+      const tokenUser = new ExampleTokenUser(deployerAccount, zkApp.token.id);
+      const approveSendingCallback = Experimental.Callback.create(
+        tokenUser, 'approveSend', [amount100]
+      );
+      zkApp.sendTokens(deployerAccount, sendToAddress, amount100, approveSendingCallback);
     });
     await txn.prove();
     await expect(txn.sign([deployerKey]).send()).rejects.toThrow();
@@ -116,15 +124,26 @@ describe('ExampleToken', () => {
       ...deployerAccount.toFields(),
     ]);
 
+    const tokenUser = new ExampleTokenUser(deployerAccount, zkApp.token.id);
+
     // successful send
-    const txn = await Mina.transaction(deployerAccount, () => {
-      AccountUpdate.fundNewAccount(deployerAccount);
+    const txn = await Mina.transaction(senderAccount, () => {
+      AccountUpdate.fundNewAccount(senderAccount);
       zkApp.mint(deployerAccount, amount100, mintSignature);
-      AccountUpdate.fundNewAccount(deployerAccount);
-      zkApp.sendTokens(deployerAccount, sendToAddress, amount100);
+      zkApp.tokenDeploy(deployerAccount, ExampleTokenUser._verificationKey!);
     });
     await txn.prove();
-    await txn.sign([deployerKey]).send();
+    await txn.sign([senderKey, deployerKey]).send();
+
+    const txn2 = await Mina.transaction(senderAccount, () => {
+      AccountUpdate.fundNewAccount(senderAccount);
+      const approveSendingCallback = Experimental.Callback.create(
+        tokenUser, 'approveSend', [amount100]
+      );
+      zkApp.sendTokens(deployerAccount, sendToAddress, amount100, approveSendingCallback);
+    })
+    await txn2.prove();
+    await txn2.sign([senderKey]).send();
 
     expect(Mina.getBalance(sendToAddress, zkApp.token.id)).toEqual(amount100);
   });

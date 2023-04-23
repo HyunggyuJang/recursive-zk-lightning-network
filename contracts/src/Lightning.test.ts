@@ -304,5 +304,29 @@ describe('Lightning', () => {
     balanceMerkeleMap.set(zkApp.serializeBalancekKey(userAddress, tokenAddress), Field(100 - 25));
     expect(zkApp.balanceMerkleMapRoot.get()).toEqual(balanceMerkeleMap.getRoot());
 
+    (Mina.activeInstance as ReturnType<typeof Mina.LocalBlockchain>).setBlockchainLength(timeLock.add(1));
+    const balanceWitnessFinal = balanceMerkeleMap.getWitness(
+      zkApp.serializeBalancekKey(userAddress, tokenAddress)
+    );
+    const timeLockWitnessFinal = timeLockMerkleMap.getWitness(
+      zkApp.serializeTimeLockKey(userAddress, tokenAddress)
+    );
+
+    const txn3 = await Mina.transaction(deployerAccount, () => {
+      zkApp.withdraw(
+        tokenAddress,
+        userAddress,
+        timeLockWitnessFinal,
+        balanceWitnessFinal,
+        Field.fromFields(timeLock.toFields()),
+        Field(100 - 25)
+      );
+    });
+    debugger;
+    await txn3.prove();
+    const signed = txn3.sign([deployerKey]);
+    console.log(txn3.toPretty())
+    await signed.send();
+    expect(Mina.getBalance(userAddress, tokenApp.token.id)).toEqual(Field(100 - 25));
   });
 });
